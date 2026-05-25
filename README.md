@@ -77,8 +77,5 @@ This software is open-source and entirely **free** for experimental and individu
 💼 **For commercial use, enterprise rights, please contact:**
 📧 atillakdeniz@icloud.com
 
-```
 © 2025 Atilla AKDENİZ — Commercial use requires written permission.
 This project is provided as-is. No support SLA guaranteed.
-
-```
