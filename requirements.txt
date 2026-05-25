@@ -11,3 +11,5 @@ scikit-learn
 openpyxl
 xlsxwriter
 statsmodels
+gluonts
+torch
