@@ -1,10 +1,11 @@
 streamlit
 pandas
 numpy
+holidays
+shap
+joblib
 plotly
 lightgbm
-xgboost
-catboost
 pmdarima
 scikit-learn
 openpyxl
