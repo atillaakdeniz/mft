@@ -8,3 +8,4 @@ catboost
 pmdarima
 scikit-learn
 openpyxl
+xlsxwriter
