@@ -10,3 +10,4 @@ pmdarima
 scikit-learn
 openpyxl
 xlsxwriter
+statsmodels
