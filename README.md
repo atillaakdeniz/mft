@@ -72,10 +72,12 @@ python -m streamlit run app.py
 
 ## 📜 License & Commercial Use
 
-This software is open-source and entirely **free** for experimental and individual use.
+This project is licensed under a custom Business Source License.
+Free for personal, academic, and non-profit use.
 
+**Commercial use requires written permission.**
 💼 **For commercial use, enterprise rights, please contact:**
 📧 atillakdeniz@icloud.com
 
-© 2025 Atilla AKDENİZ — Commercial use requires written permission.
+© 2025 Atilla AKDENİZ
 This project is provided as-is. No support SLA guaranteed.
