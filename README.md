@@ -1,4 +1,4 @@
-### 🇬🇧 English README.md
+### README.md
 # 📊 Mini Forecast Tool (MFT) - Enterprise Demand Planning Platform
 
 MFT (Mini Forecast Tool) is an **Enterprise-Grade Demand Forecasting and S&OP Platform** developed with Python and Streamlit. It is designed to optimize demand planning processes in the FMCG sector by bridging the gap between simple statistical models and modern Global Machine Learning architectures.
