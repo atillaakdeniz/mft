@@ -1,74 +1,79 @@
-### README.md
-# 📊 Mini Forecast Tool (MFT) - Enterprise Demand Planning Platform
+# 📊 MFT OS v5.2 - Mini Forecast Tool
 
-MFT (Mini Forecast Tool) is an **Enterprise-Grade Demand Forecasting and S&OP Platform** developed with Python and Streamlit. It is designed to optimize demand planning processes in the FMCG sector by bridging the gap between simple statistical models and modern Global Machine Learning architectures.
+MFT (Mini Forecast Tool) is an **Forecasting Tool** built with Python and Streamlit. Designed specifically for the FMCG (Fast-Moving Consumer Goods) sector, it bridges the gap between traditional statistical methods and modern Global Machine Learning architectures.
 
-The software guides supply chain teams by analyzing thousands of unique SKUs, promotional fluctuations, historical stockouts, and complex time-series dynamics in seconds.
+MFT processes thousands of SKUs, handles promotional fluctuations, manages historical stockouts, and models complex time-series dynamics in seconds with strict data leakage prevention and ML governance.
 
 ---
 
-## 🕹️ Operation Modes (Dual-Engine Architecture)
+## 🚀 Key Enterprise Features (v5 Architecture)
 
-MFT features two distinct forecasting engines tailored to different user needs:
-
-### 1. 🛠️ Basic Mode
-Designed for fast, linear, and classical supply chain approaches. It trains independent models for each SKU.
-* **Models:** Naive, Moving Average, Holt-Winters, Hardcoded SARIMA $(1,1,1)$, XGBoost, LightGBM, CatBoost, Croston, SBA, TSB.
-* **Metrics:** Selects the best model based on standard MAPE (Mean Absolute Percentage Error).
-* **Output:** Generates direct point forecasts.
-
-### 2. 🚀 Advanced Mode (Enterprise Edition)
-Delivers advanced time-series engineering and probabilistic forecasting infrastructure used by global FMCG giants.
-* **Advanced Preprocessing:** Z-Score based **Winsorization (Capping)** for promotional spikes; automatic **Stockout Imputation** via rolling means.
-* **Global ML Architecture:** Utilizes a **Global LightGBM** engine that pools all SKUs into a single dataset (Shared Learning).
-* **Smart Statistical Engine:** Stepwise **AutoARIMA** with AIC/BIC optimization.
-* **Probabilistic Forecasting (Confidence Intervals):** Generates **P10 (Pessimistic), P50 (Target), and P90 (Optimistic)** scenarios for safety stock and risk management.
-* **Forecast Value Added (FVA):** Measures the value added by advanced ML models compared to a simple Naive baseline.
+* **100% Leakage-Free Pipeline:** Expanding window limits for winsorization (outlier capping) and stockout imputation ensure that future data never leaks into past training sets.
+* **Global Machine Learning (Shared Learning):** Utilizes a pooled **Global LightGBM** engine across all SKUs, capturing cross-product seasonality, momentum, and holiday effects simultaneously.
+* **Strict ML Governance & Audit Trail:** Features an interactive "Planner Override" grid. The system automatically tracks any manual adjustments made by demand planners against the baseline ML forecast and exports a detailed delta/audit log.
+* **Dynamic Feature Registry:** Single-source-of-truth feature engineering pipeline. Automatically generates, registers, and drops NaNs for lag safety (Lag_1 to Lag_12, Rolling Stats, Cyclical Seasonality).
+* **Explainable AI (XAI):** Integrated **SHAP (SHapley Additive exPlanations)** dashboard to visualize top forecast drivers and provide model transparency to stakeholders.
+* **Conformal Prediction (Uncertainty Intervals):** Generates robust **P10 (Pessimistic) and P90 (Optimistic)** bounds around the P50 forecast for optimal safety stock and risk management.
+* **Parallel Processing:** Multi-threaded local model evaluation (AutoARIMA, Croston, TSB) utilizing `joblib` for maximum CPU efficiency.
+* **Robust Segmentation:** Advanced multi-dimensional segmentation (ADI, CV2, Zero-Ratio) to accurately route Smooth, Volatile, Intermittent, and Lumpy SKUs to their ideal algorithmic engines.
 
 ---
 
 ## 🛠️ Architecture & Data Pipeline
 
 ```text
-[Raw Data Upload] ➡️ [SKU Mapping & Consolidation] ➡️ [Outlier & Stockout Treatment]
+[Raw Data Upload] ➡️ [Monthly Alignment & SKU Consolidation] ➡️ [Leakage-Free Outlier & Stockout Treatment]
          ⬇️
-[Global Feature Engineering Matrix] ➡️ [Model Tournament & Cross-Validation] ➡️ [Interactive Planner Override]
+[Feature Registry & Lag Safety Check] ➡️ [Parallel Walk-Forward Validation] ➡️ [Governance & Audit Delta]
 
 ```
-
-1. **Data Consolidation:** Automatically merges historical conjugate SKUs or code changes via mapping templates.
-2. **Feature Engineering:** Extracts time-series dynamics for ML models (Lags, Rolling Stats, Momentum, Cyclical Seasonality).
-3. **Walk-Forward Validation:** Uses expanding window cross-validation to prevent future data leakage.
-4. **FMCG-Safe Metrics:** Uses volume-weighted **WMAPE** and **Forecast Bias** instead of standard MAPE to accurately reflect business impact.
 
 ---
 
-## 📦 Installation & Usage
+## 📦 Installation & Setup
 
-### 1. Installation
+**Prerequisites:** Python 3.9 or higher.
 
-Python 3.9+ is required. Run the following command in your terminal:
+**1. Clone the repository and navigate to the directory:**
 
 ```bash
-pip install streamlit pandas numpy plotly xgboost lightgbm catboost pmdarima scikit-learn openpyxl xlsxwriter
+git clone [https://github.com/atillaakdeniz/mft.git](https://github.com/atillaakdeniz/mft.git)
+cd mft
 
 ```
 
-### 2. Running the App
+**2. Install the required dependencies:**
+Create a virtual environment (recommended) and install the packages listed in `requirements.txt`:
+
+```bash
+pip install -r requirements.txt
+
+```
+
+*(Dependencies include: `streamlit, pandas, numpy, holidays, shap, joblib, plotly, lightgbm, pmdarima, scikit-learn, openpyxl, xlsxwriter`)*
+
+**3. Run the application:**
 
 ```bash
 python -m streamlit run app.py
 
 ```
 
-### 3. Usage Guide
-
-1. **Data Upload:** Download the "Sales Data Template" from the main screen, populate it, and upload. Use the SKU Mapping template if you need to consolidate old/new product codes.
-2. **Select Mode:** Choose between **Basic** or **Advanced** mode from the sidebar.
-3. **Run Forecast:** Set your forecast horizon, select the engines, and click "Run Forecast".
-4. **Planner Override:** In Advanced Mode, the results grid is editable. You can manually adjust the `Final (P50)` forecast column before exporting the final plan to Excel.
+The platform will automatically open in your default web browser at `http://localhost:8501`.
 
 ---
+
+## 💡 Usage Guide
+
+1. **Data Upload:** Click the download button in the app to get the standard `Sales Data Template`. Format your historical data (`SKU Code`, `SKU Description`, `Date`, `Sales`) and upload it.
+2. **Configure Parameters:** Set your forecast horizon (e.g., 6 months) and toggle advanced treatments (Winsorization, Imputation, Conformal Intervals) from the sidebar.
+3. **Select Engines:** Choose the forecasting engines to participate in the tournament (Global LightGBM, AutoARIMA, Intermittent models).
+4. **Execute Pipeline:** Click **Execute Certified Pipeline**. The system will process features, train the global model, run parallel validations, and output the results.
+5. **Planner Override & Export:** Review the interactive grid. Make any manual market-driven adjustments directly in the UI. When you click **Export Plan & Audit Trail**, the system downloads a multi-sheet Excel file containing both your final S&OP plan and the governance audit log.
+
+```
+
+```
 
 ## 📜 License & Commercial Use
 
@@ -81,3 +86,6 @@ Free for personal, academic, and non-profit use.
 
 © 2025 Atilla AKDENİZ
 This project is provided as-is. No support SLA guaranteed.
+
+
+*Created by a demand planner, for supply chain resilience.*
