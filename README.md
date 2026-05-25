@@ -1,4 +1,4 @@
-# 📊 MFT v5.2 - Mini Forecast Tool
+# 📊 MFT v5.0 - Mini Forecast Tool
 
 MFT (Mini Forecast Tool) is an **Forecasting Tool** built with Python and Streamlit. Designed specifically for the FMCG (Fast-Moving Consumer Goods) sector, it bridges the gap between traditional statistical methods and modern Global Machine Learning architectures.
 
