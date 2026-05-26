@@ -17,15 +17,6 @@ import pmdarima as pm
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 
-# ---------- PyTorch LSTM ----------
-try:
-    import torch
-    import torch.nn as nn
-    from torch.utils.data import DataLoader, TensorDataset
-    TORCH_AVAILABLE = True
-except ImportError:
-    TORCH_AVAILABLE = False
-
 warnings.filterwarnings('ignore')
 st.set_page_config(page_title="Mini Forecast Tool (MFT)", layout="wide")
 
@@ -349,162 +340,7 @@ def process_single_sku(sku, df, desc_map, segments, test_df, global_lgb,
                          'Reason': f'System Crash: {str(e)}'}}
 
 # ==========================================
-#    6. DEEP LEARNING MODE (LSTM)
-# ==========================================
-class GlobalLSTM(nn.Module):
-    def __init__(self, input_size, hidden_size=64, num_layers=2, dropout=0.2):
-        super().__init__()
-        self.lstm = nn.LSTM(input_size, hidden_size, num_layers,
-                            batch_first=True, dropout=dropout)
-        self.fc = nn.Linear(hidden_size, 1)
-
-    def forward(self, x):
-        out, _ = self.lstm(x)
-        out = self.fc(out[:, -1, :])
-        return out
-
-def create_sequences(data, seq_len, horizon, features, target_col='Sales'):
-    X, y = [], []
-    for sku, grp in data.groupby('SKU Code'):
-        grp = grp.sort_values('Datetime')
-        vals = grp[features].values
-        target = grp[target_col].values
-        for i in range(len(vals) - seq_len - horizon + 1):
-            X.append(vals[i:i+seq_len])
-            y.append(target[i+seq_len:i+seq_len+horizon])
-    if len(X) == 0:
-        return np.empty((0, seq_len, len(features)), dtype=np.float32), np.empty((0, horizon), dtype=np.float32)
-    return np.array(X, dtype=np.float32), np.array(y, dtype=np.float32)
-
-def run_lstm_forecast(df, segments, desc_map, feature_registry,
-                      global_max_date, forecast_horizon, future_dates,
-                      val_months, use_dynamic_features,
-                      seq_len, epochs, batch_size, lr,
-                      calc_intervals, use_min_sales, min_sales_req):
-    results, failed_skus = [], []
-    cutoff_date = global_max_date - pd.DateOffset(months=val_months)
-
-    if use_dynamic_features and feature_registry:
-        features = ['Sales'] + feature_registry
-    else:
-        features = ['Sales']
-
-    train_df = df[df['Datetime'] <= cutoff_date].copy()
-
-    valid_skus = []
-    for sku in df['SKU Code'].unique():
-        ts = df[df['SKU Code'] == sku]['Sales'].values
-        if use_min_sales:
-            if (pd.Series(ts) > 0).rolling(window=min_sales_req).sum().max() < min_sales_req:
-                failed_skus.append({'SKU Code': sku, 'SKU Description': desc_map.get(sku, 'Unknown'),
-                                    'Reason': f'Failed Continuous Sales Rule ({min_sales_req}m)'})
-                continue
-        if len(ts) < (val_months + seq_len):
-            failed_skus.append({'SKU Code': sku, 'SKU Description': desc_map.get(sku, 'Unknown'),
-                                'Reason': f'Insufficient History (<{val_months+seq_len}m)'})
-            continue
-        valid_skus.append(sku)
-
-    if len(valid_skus) == 0:
-        return results, failed_skus
-
-    X_train, y_train = create_sequences(train_df[train_df['SKU Code'].isin(valid_skus)],
-                                        seq_len, forecast_horizon, features)
-
-    if len(X_train) == 0:
-        st.error("Not enough data to train LSTM")
-        return results, failed_skus
-
-    input_size = len(features)
-    model = GlobalLSTM(input_size)
-    criterion = nn.MSELoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-
-    dataset = TensorDataset(torch.from_numpy(X_train), torch.from_numpy(y_train))
-    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-
-    model.train()
-    for epoch in range(epochs):
-        for batch_x, batch_y in loader:
-            optimizer.zero_grad()
-            preds = model(batch_x)
-            loss = criterion(preds, batch_y)
-            loss.backward()
-            optimizer.step()
-
-    model.eval()
-
-    for sku in valid_skus:
-        sku_grp = df[df['SKU Code'] == sku].sort_values('Datetime')
-        ts = sku_grp['Sales'].values
-        target_full = sku_grp.set_index('Datetime')['Sales'].asfreq('MS', fill_value=0)
-        train_target = target_full[:cutoff_date]
-        test_actual = target_full[cutoff_date:][:val_months].values
-
-        train_vals = sku_grp[features].values[:len(train_target)]
-        if len(train_vals) < seq_len:
-            continue
-        input_seq = train_vals[-seq_len:].astype(np.float32)
-        with torch.no_grad():
-            val_out = model(torch.from_numpy(input_seq).unsqueeze(0)).numpy().flatten()
-            val_out = np.nan_to_num(val_out, nan=0.0)
-            if len(val_out) < val_months:
-                val_pred = np.pad(val_out, (0, val_months - len(val_out)), constant_values=0)
-            else:
-                val_pred = val_out[:val_months]
-
-        wmape, bias = calculate_ts_cv_metrics(test_actual, val_pred)
-
-        full_vals = sku_grp[features].values
-        if len(full_vals) < seq_len:
-            continue
-        input_full = full_vals[-seq_len:].astype(np.float32)
-        with torch.no_grad():
-            final_out = model(torch.from_numpy(input_full).unsqueeze(0)).numpy().flatten()
-            final_out = np.nan_to_num(final_out, nan=0.0)
-            if len(final_out) < forecast_horizon:
-                final_pred = np.pad(final_out, (0, forecast_horizon - len(final_out)), constant_values=0)
-            else:
-                final_pred = final_out[:forecast_horizon]
-        final_vals = np.round(np.maximum(0, final_pred)).astype(int)
-
-        p10 = p90 = None
-        if calc_intervals:
-            res = test_actual - val_pred
-            p10, p90 = propagate_uncertainty(final_vals.astype(float), res)
-
-        row_data = {
-            'SKU Code': sku,
-            'SKU Description': desc_map.get(sku, 'Unknown'),
-            'Demand Segment': segments.get(sku, 'Unknown'),
-            'Winning Engine': 'LSTM (Global)',
-            'FVA (%)': 0.0,
-            'Val. WMAPE (%)': round(wmape, 1),
-            'Val. Bias (%)': round(bias, 1),
-            'Volume': ts.sum()
-        }
-        for i, f_date in enumerate(future_dates):
-            mon_str = f"{f_date.year}-{f_date.month:02d}"
-            final_val = final_vals[i]
-            if np.isnan(final_val):
-                final_val = 0
-            row_data[f"{mon_str}_Original"] = final_val
-            row_data[f"{mon_str} Final (P50)"] = final_val
-            if calc_intervals and p10 is not None and p90 is not None:
-                p10_val = p10[i] if i < len(p10) else 0
-                p90_val = p90[i] if i < len(p90) else 0
-                if np.isnan(p10_val):
-                    p10_val = 0
-                if np.isnan(p90_val):
-                    p90_val = 0
-                row_data[f"{mon_str} P10"] = int(p10_val)
-                row_data[f"{mon_str} P90"] = int(p90_val)
-        results.append(row_data)
-
-    return results, failed_skus
-
-# ==========================================
-#    7. UI & ORCHESTRATION
+#    6. UI & ORCHESTRATION
 # ==========================================
 if 'pipeline_run' not in st.session_state:
     st.session_state.pipeline_run = False
@@ -524,9 +360,7 @@ if 'raw_row_count' not in st.session_state:
     st.session_state.raw_row_count = 0
 
 st.sidebar.header("🕹️ Operation Mode")
-app_mode = st.sidebar.radio("Select Engine:", 
-                            ["Basic Mode", "Advanced Enterprise Mode", "Deep Learning Mode"],
-                            index=1)
+app_mode = st.sidebar.radio("Select Engine:", ["Basic Mode", "Advanced Enterprise Mode"], index=1)
 st.sidebar.markdown("---")
 
 if app_mode == "Basic Mode":
@@ -561,27 +395,6 @@ elif app_mode == "Advanced Enterprise Mode":
     calc_intervals = st.sidebar.checkbox("Generate Conformal Intervals", value=True)
     val_months = st.sidebar.slider("Validation Period (Months):", 1, 6, 3)
 
-elif app_mode == "Deep Learning Mode":
-    st.sidebar.header("🧠 Deep Learning Parameters")
-    forecast_horizon = st.sidebar.slider("Forecast Horizon (Months):", 1, 24, 6)
-    val_months = st.sidebar.slider("Validation Period (Months):", 1, 6, 3)
-
-    use_min_sales = st.sidebar.checkbox("Enable Min Continuous Sales Rule", value=True)
-    min_sales_req = st.sidebar.slider("Min Continuous Sales (Months):", 1, 12, 6) if use_min_sales else 1
-
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("LSTM Hyperparameters")
-    seq_len = st.sidebar.number_input("Sequence Length (months)", 6, 36, 12)
-    epochs = st.sidebar.slider("Training Epochs", 10, 200, 50)
-    batch_size = st.sidebar.selectbox("Batch Size", [16, 32, 64, 128], index=1)
-    lr = st.sidebar.select_slider("Learning Rate",
-                                  options=[1e-4, 5e-4, 1e-3, 5e-3, 1e-2], value=1e-3)
-    use_dynamic_features = st.sidebar.checkbox("Use Dynamic Features (Lag, Holidays, etc.)", value=True)
-    calc_intervals = st.sidebar.checkbox("Generate Confidence Intervals (P10/P90)", value=True)
-
-    if not TORCH_AVAILABLE:
-        st.sidebar.error("PyTorch not installed. Run: `pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/cpu`")
-
 # --- Forecast Threshold ---
 st.sidebar.markdown("---")
 st.sidebar.subheader("🎯 Forecast Threshold")
@@ -608,7 +421,7 @@ st.sidebar.info("🐍 **Built with Python**\n\nThis software is **open-source** 
 st.sidebar.markdown("<div style='text-align: center; color: #888; font-size: 12px;' title='a humble demand planner'>Created by <b>Atilla AKDENİZ</b></div>", unsafe_allow_html=True)
 
 st.title("📊 Mini Forecast Tool (MFT)")
-st.caption("🚀 Unified Dual-Engine Architecture + LSTM")
+st.caption("🚀 Unified Dual-Engine Architecture (v5.2 + v5.0 UI)")
 
 # --- SALES TEMPLATE DOWNLOAD ---
 def get_sales_template():
@@ -834,37 +647,6 @@ if uploaded_file is not None:
             st.session_state.fail_df = pd.DataFrame(failed_skus)
             status_text.success(f"✅ Pipeline Completed in {int(time.time() - start_time)} seconds.")
 
-        # ==========================================
-        #          DEEP LEARNING MODE
-        # ==========================================
-        elif app_mode == "Deep Learning Mode":
-            if not TORCH_AVAILABLE:
-                st.error("PyTorch is required for Deep Learning Mode. See sidebar for install instructions.")
-                st.stop()
-
-            status_text.info("⚙️ Preprocessing & Feature Generation...")
-            segments = {}
-            for sku in all_skus:
-                mask = df['SKU Code'] == sku
-                ts = df.loc[mask, 'Sales'].values
-                segments[sku] = get_robust_segment(ts)
-
-            df_feat, feature_registry = generate_features(df)
-            st.session_state.feature_registry = feature_registry
-
-            status_text.info("🧠 Training Global LSTM...")
-            results, failed_skus = run_lstm_forecast(
-                df_feat, segments, desc_map, feature_registry,
-                global_max_date, forecast_horizon, future_dates,
-                val_months, use_dynamic_features,
-                seq_len, epochs, batch_size, lr,
-                calc_intervals, use_min_sales, min_sales_req
-            )
-
-            st.session_state.res_df = pd.DataFrame(results)
-            st.session_state.fail_df = pd.DataFrame(failed_skus)
-            status_text.success(f"✅ Pipeline Completed in {int(time.time() - start_time)} seconds.")
-
 # --- POST-PROCESSING: FORECAST THRESHOLD FILTER ---
 if st.session_state.pipeline_run:
     res_df = st.session_state.res_df.copy()
@@ -1054,44 +836,6 @@ if st.session_state.pipeline_run and not st.session_state.res_df.empty:
                     columns=['Feature', 'Description']
                 )
                 st.table(desc_df)
-
-    elif app_mode == "Deep Learning Mode":
-        st.markdown("### 🤖 LSTM Forecast Results")
-        with st.expander("🛠️ Show Pipeline Metadata (Feature Registry & Setup)"):
-            st.write(f"**Total Features Used:** {len(st.session_state.feature_registry)}")
-            st.code(", ".join(st.session_state.feature_registry))
-            st.write(f"**Validation Strategy:** Walk-Forward (Last {val_months} Periods)")
-
-        display_cols = [c for c in res_df.columns if not c.endswith('_Original') and c != 'Volume']
-        edited_df = st.data_editor(res_df[display_cols], num_rows="fixed", use_container_width=True)
-
-        future_dates_str = [c for c in res_df.columns if "Final (P50)" in c]
-        audit_data = []
-        for col in future_dates_str:
-            orig_col = col.replace(" Final (P50)", "_Original")
-            if orig_col in res_df.columns:
-                diff = edited_df[col] - res_df[orig_col]
-                for idx, val in diff[diff != 0].items():
-                    audit_data.append({
-                        'SKU Code': edited_df.loc[idx, 'SKU Code'],
-                        'Period': col.split()[0],
-                        'System Forecast': res_df.loc[idx, orig_col],
-                        'Planner Override': edited_df.loc[idx, col],
-                        'Delta': val
-                    })
-        if audit_data:
-            st.warning(f"🚨 **Governance Alert:** {len(audit_data)} manual overrides detected.")
-            audit_df = pd.DataFrame(audit_data)
-            st.dataframe(audit_df, use_container_width=True)
-            buf = io.BytesIO()
-            with pd.ExcelWriter(buf, engine='xlsxwriter') as writer:
-                edited_df.to_excel(writer, index=False, sheet_name='Final_Plan')
-                audit_df.to_excel(writer, index=False, sheet_name='Audit_Trail')
-            st.download_button("📥 Export Plan & Audit Trail", data=buf.getvalue(),
-                               file_name="DL_Plan_with_Audit.xlsx")
-        else:
-            st.download_button("📥 Export Final Plan", data=to_excel_download(edited_df),
-                               file_name="DL_Plan.xlsx")
 
     # ==========================================
     #   GROUPED EXCLUSION LOG
