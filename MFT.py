@@ -596,10 +596,14 @@ if uploaded_file is not None:
             timer_placeholder.empty()
 
         # ==========================================
-        #          ADVANCED MODE
+        #          ADVANCED MODE (with dtype fix)
         # ==========================================
         elif app_mode == "Advanced Enterprise Mode":
             status_text.info("⚙️ Phase 1: Robust Segmentation & Leakage-Safe Treatments...")
+            
+            # Fix: Ensure Sales column is float so treatments can be assigned
+            df['Sales'] = df['Sales'].astype(float)
+
             segments = {}
             for sku in all_skus:
                 mask = df['SKU Code'] == sku
